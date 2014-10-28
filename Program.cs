@@ -1,4 +1,5 @@
 ﻿using System;
+using System.Diagnostics;
 using System.IO;
 using System.Xml;
 using WindowsInstaller;
@@ -12,39 +13,58 @@ namespace CreateInstallDescriptor
             // Make sure we received two parameters
             if (args.Length != 2)
             {
-                Console.WriteLine("Must supply two parameters: <input MSI file> <output XML file>");
+                Console.WriteLine("Must supply two parameters: <input file> <output XML file>");
                 return;
             }
 
             // Extract the parameters
-            string inputFile = args[0];
-            string outputFile = args[1];
+            var inputFileName = args[0];
+            var outputFileName = args[1];
 
-            // Get the type of the Windows Installer object
-            Type installerType = Type.GetTypeFromProgID("WindowsInstaller.Installer");
+            // Get the info for the input file
+            var inputFile = new FileInfo(inputFileName);
 
-            // Create the Windows Installer object
-            Installer installer = (Installer)Activator.CreateInstance(installerType);
+            var extension = inputFile.Extension;
 
-            // Open the MSI database in the input file
-            Database database = installer.OpenDatabase(inputFile, MsiOpenDatabaseMode.msiOpenDatabaseModeReadOnly);
+            string version;
 
-            // Open a view on the Property table for the version property
-            View view = database.OpenView("SELECT * FROM Property WHERE Property = 'ProductVersion'");
+            if (extension.Equals(".msi", StringComparison.InvariantCultureIgnoreCase))
+            {
+                // Get the type of the Windows Installer object
+                var installerType = Type.GetTypeFromProgID("WindowsInstaller.Installer");
 
-            // Execute the view query
-            view.Execute(null);
+                // Create the Windows Installer object
+                var installer = (Installer) Activator.CreateInstance(installerType);
 
-            // Get the record from the view
-            Record record = view.Fetch();
+                // Open the MSI database in the input file
+                var database = installer.OpenDatabase(inputFileName, MsiOpenDatabaseMode.msiOpenDatabaseModeReadOnly);
 
-            // Get the version from the data
-            string version = record.get_StringData(2);
+                // Open a view on the Property table for the version property
+                var view = database.OpenView("SELECT * FROM Property WHERE Property = 'ProductVersion'");
+
+                // Execute the view query
+                view.Execute();
+
+                // Get the record from the view
+                var record = view.Fetch();
+
+                // Get the version from the data
+                version = record.StringData[2];
+            }
+            else if (extension.Equals(".exe", StringComparison.InvariantCultureIgnoreCase) || extension.Equals(".dll", StringComparison.InvariantCultureIgnoreCase))
+            {
+                // Just use the version info from the file
+                version = FileVersionInfo.GetVersionInfo(inputFileName).FileVersion;
+            }
+            else
+            {
+                throw new Exception("Unsupported file extension");
+            }
 
             // -----
 
             // Create the XML writer
-            XmlTextWriter xmlWriter = new XmlTextWriter(outputFile, null) { Formatting = Formatting.Indented };
+            var xmlWriter = new XmlTextWriter(outputFileName, null) { Formatting = Formatting.Indented };
 
             // Write the root tag
             xmlWriter.WriteStartElement("versionInformation");
@@ -56,7 +76,7 @@ namespace CreateInstallDescriptor
 
             // Write the installer name tag
             xmlWriter.WriteStartElement("installFile");
-            xmlWriter.WriteValue(Path.GetFileName(inputFile));
+            xmlWriter.WriteValue(Path.GetFileName(inputFileName));
             xmlWriter.WriteEndElement();
 
             // Write the installer date tag
